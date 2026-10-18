@@ -16,6 +16,10 @@ Changes from upstream, nothing else:
   2. A weekly `apk upgrade` (OS_PATCH_WEEK cache-buster), placed after the
      PostgreSQL compile layer so a weekly rebuild only re-runs that cheap
      layer.
+  3. The Alpine base is overridable (ARG ALPINE_BASE, defaulting to
+     upstream's alpine:<tag>): SonicSort passes sonicsort-alpine:local, its
+     own Alpine assembled from Alpine's signed packages by
+     poslogica/docker-alpine.
 
 Layering on the published image instead doesn't work: the old gosu would
 stay in its lower layer, and scanners still report it.
@@ -70,10 +74,14 @@ RUN apk upgrade --no-cache
 
 
 def generate(variant: str) -> Path:
+    """Write <variant>/Dockerfile.sonicsort from upstream's <variant>/Dockerfile; returns its path."""
     src = ROOT / variant / "Dockerfile"
     text = src.read_text(encoding="utf-8")
 
-    gosu_version = re.search(r"^ENV GOSU_VERSION (\S+)$", text, re.M).group(1)
+    gosu_match = re.search(r"^ENV GOSU_VERSION (\S+)$", text, re.M)
+    if not gosu_match:
+        sys.exit(f"{src}: no 'ENV GOSU_VERSION' -- upstream layout changed, update generate.py")
+    gosu_version = gosu_match.group(1)
 
     # Upstream's "do not edit" banner, replaced by ours.
     text = re.sub(r"\A(#.*\n)+\n", "", text)
@@ -85,10 +93,18 @@ def generate(variant: str) -> Path:
         sys.exit(f"{src}: gosu block not found -- upstream layout changed, update generate.py")
     text = gosu_block.sub(lambda _: GOSU_COPY.format(gosu_version=gosu_version), text, count=1)
 
-    if not re.search(r"^FROM alpine:", text, re.M):
+    alpine = re.search(r"^FROM (alpine:\S+)$", text, re.M)
+    if not alpine:
         sys.exit(f"{src}: no 'FROM alpine:' -- only alpine variants are supported")
-    text = re.sub(r"^(FROM alpine:)", GOSU_STAGE.format(gosu_version=gosu_version) + r"\1", text,
-                  count=1, flags=re.M)
+    # The Alpine base becomes overridable (ALPINE_BASE, defaulting to upstream's
+    # tag): SonicSort passes sonicsort-alpine:local, its own Alpine assembled by
+    # poslogica/docker-alpine. The ARG has to precede the first FROM (the gosu
+    # stage) to be usable in a FROM line.
+    text = text.replace(f"FROM {alpine.group(1)}\n", "FROM ${ALPINE_BASE}\n", 1)
+    text = re.sub(r"^(FROM \$\{ALPINE_BASE\})",
+                  GOSU_STAGE.format(gosu_version=gosu_version) + r"\1", text, count=1, flags=re.M)
+    text = re.sub(r"^(FROM golang:)",
+                  f"ARG ALPINE_BASE={alpine.group(1)}\n\n" + r"\1", text, count=1, flags=re.M)
 
     anchor = "COPY docker-entrypoint.sh"
     if anchor not in text:

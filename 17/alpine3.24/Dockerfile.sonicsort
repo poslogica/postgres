@@ -8,12 +8,14 @@
 # (PG_VERSION, configure flags, entrypoint, postgres uid 70) is upstream's,
 # so existing data volumes are unaffected. See sonicsort/generate.py.
 
+ARG ALPINE_BASE=alpine:3.24
+
 FROM golang:1.27-alpine AS gosu
 ARG GOSU_VERSION=1.19
 ENV CGO_ENABLED=0 GOTOOLCHAIN=local
 RUN go install -trimpath -ldflags "-s -w" "github.com/tianon/gosu@${GOSU_VERSION}"
 
-FROM alpine:3.24
+FROM ${ALPINE_BASE}
 
 # 70 is the standard uid/gid for "postgres" in Alpine
 # https://git.alpinelinux.org/aports/tree/main/postgresql-common/postgresql-common.pre-install?h=3.22-stable
