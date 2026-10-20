@@ -194,6 +194,12 @@ RUN apk upgrade --no-cache
 
 COPY docker-entrypoint.sh docker-ensure-initdb.sh /usr/local/bin/
 RUN ln -sT docker-ensure-initdb.sh /usr/local/bin/docker-enforce-initdb.sh
+# Start as postgres (uid/gid 70, the user upstream creates above) rather than
+# root, for SonicSort's non-root containers (poslogica/sonicsort#154). The
+# entrypoint supports this: as non-root it skips its chown/gosu steps. Data
+# volumes must already be owned by uid 70 -- true for any volume upstream's
+# entrypoint initialised. Numeric, so k8s runAsNonRoot can verify it.
+USER 70:70
 ENTRYPOINT ["docker-entrypoint.sh"]
 
 # We set the default STOPSIGNAL to SIGINT, which corresponds to what PostgreSQL

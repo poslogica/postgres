@@ -20,6 +20,11 @@ Changes from upstream, nothing else:
      upstream's alpine:<tag>): SonicSort passes sonicsort-alpine:local, its
      own Alpine assembled from Alpine's signed packages by
      poslogica/docker-alpine.
+  4. Start as the postgres user (USER 70:70) instead of root: upstream's
+     entrypoint starts as root, fixes data-directory ownership, then drops
+     to postgres with gosu. Started as postgres it skips the ownership
+     steps, which SonicSort's volumes don't need (initdb already ran as
+     postgres, so they're owned by uid 70). gosu stays installed, unused.
 
 Layering on the published image instead doesn't work: the old gosu would
 stay in its lower layer, and scanners still report it.
@@ -73,6 +78,15 @@ RUN apk upgrade --no-cache
 """
 
 
+NON_ROOT = """# Start as postgres (uid/gid 70, the user upstream creates above) rather than
+# root, for SonicSort's non-root containers (poslogica/sonicsort#154). The
+# entrypoint supports this: as non-root it skips its chown/gosu steps. Data
+# volumes must already be owned by uid 70 -- true for any volume upstream's
+# entrypoint initialised. Numeric, so k8s runAsNonRoot can verify it.
+USER 70:70
+"""
+
+
 def generate(variant: str) -> Path:
     """Write <variant>/Dockerfile.sonicsort from upstream's <variant>/Dockerfile; returns its path."""
     src = ROOT / variant / "Dockerfile"
@@ -110,6 +124,11 @@ def generate(variant: str) -> Path:
     if anchor not in text:
         sys.exit(f"{src}: '{anchor}' not found -- update generate.py")
     text = text.replace(anchor, OS_PATCH + anchor, 1)
+
+    entrypoint = 'ENTRYPOINT ["docker-entrypoint.sh"]'
+    if entrypoint not in text:
+        sys.exit(f"{src}: '{entrypoint}' not found -- update generate.py")
+    text = text.replace(entrypoint, NON_ROOT + entrypoint, 1)
 
     out = src.with_name("Dockerfile.sonicsort")
     out.write_text(HEADER + "\n" + text, encoding="utf-8", newline="\n")
